@@ -11,9 +11,6 @@ environment:
   sdk: ">=2.12.0 <4.0.0"
 
 dependencies:
-  # needed for kIsWeb
-  flutter:
-    sdk: flutter
 
 dev_dependencies:
   faker: ^2.0.0-rc.1
