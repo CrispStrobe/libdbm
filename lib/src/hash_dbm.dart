@@ -190,6 +190,19 @@ class HashDBM implements DBM {
     if (!_header.validate()) {
       throw DBMException(500, 'Header CRC mismatch');
     }
+    if (existing) {
+      // A legacy file skips the CRC check, so a corrupt header can still slip a
+      // garbage memory-pool offset (→ a monster write extending the file to
+      // exabytes) or bucket count (→ allocating a huge bucket table). Both must
+      // fit the file — an element/offset can't lie past the bytes on disk.
+      if (_header.memPoolOffset < 0 || _header.memPoolOffset > length) {
+        throw DBMException(
+            500, 'Corrupt memory-pool offset ${_header.memPoolOffset}');
+      }
+      if (_header.numBuckets < 1 || _header.numBuckets > length) {
+        throw DBMException(500, 'Corrupt bucket count ${_header.numBuckets}');
+      }
+    }
 
     // Format version validation
     final ver = _header.version;

@@ -67,6 +67,10 @@ class RecordBlock extends Block implements Record {
     return key.length + value.length + _DATA_OFFSET + 16;
   }
 
+  /// The smallest a record block can be: header plus zero-length key and value
+  /// (`required(empty, empty)`). A pointer naming fewer bytes is corrupt.
+  static final int minSize = _DATA_OFFSET + 16;
+
   // Note, this is used to shortcut the semantics of `putIfAbsent`
   bool _isNew = false;
 
@@ -417,11 +421,38 @@ class HashRecordPool implements RecordPool {
 
   /// Fetch a record from the underlying storage
   RecordBlock _fetch(RandomAccessFile file, Pointer pointer) {
+    // A corrupt pointer (from a mangled bucket/next chain) can name a length
+    // smaller than a record header — the block's own field writes would then
+    // overrun — or larger than the file, allocating a huge buffer and reading
+    // past EOF. Reject it before constructing the block.
+    if (pointer.offset < 0 ||
+        pointer.length < RecordBlock.minSize ||
+        pointer.offset + pointer.length > file.lengthSync()) {
+      throw DBMException(500,
+          'Invalid RecordBlock pointer (offset ${pointer.offset}, length ${pointer.length})');
+    }
+
     var ret = RecordBlock(pointer, Uint8List(pointer.length));
     ret.read(file);
 
     if (ret.magic != RecordBlock.MAGIC) {
       throw DBMException(500, 'Invalid RecordBlock magic ${ret.magic}');
+    }
+
+    // Even a correctly-magicked block can carry key/value lengths that point
+    // past its own bytes; reading `key`/`value` would overrun the buffer. Check
+    // the key length first (the value length is stored *after* the key).
+    if (ret.keyLength < 0 ||
+        ret.keyLength > pointer.length ||
+        ret.keyOffset + ret.keyLength + 8 > pointer.length) {
+      throw DBMException(
+          500, 'RecordBlock key length ${ret.keyLength} exceeds block');
+    }
+    if (ret.valueLength < 0 ||
+        ret.valueLength > pointer.length ||
+        ret.valueOffset + ret.valueLength > pointer.length) {
+      throw DBMException(
+          500, 'RecordBlock value length ${ret.valueLength} exceeds block');
     }
 
     final crc = ret.crc;
