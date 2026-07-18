@@ -268,6 +268,16 @@ class MemoryPool {
   void _read() {
     _pointers.clear();
     if (_header.page.isEmpty) return;
+    // GUARD:mempoolpage >>>
+    // The free-list page pointer is read straight from disk. A corrupt one can
+    // name bytes past EOF (→ `readInto` EINVAL) or a length large enough to
+    // allocate gigabytes. Bound it to the file before reading the block.
+    final page = _header.page;
+    if (page.offset < 0 || page.offset + page.length > _file.lengthSync()) {
+      throw DBMException(500,
+          'Corrupt memory-pool page (offset ${page.offset}, length ${page.length})');
+    }
+    // GUARD:mempoolpage <<<
     final block = PointerBlock(_header.page);
     block.read(_file);
     for (var i = 0; i < block.count; i++) {

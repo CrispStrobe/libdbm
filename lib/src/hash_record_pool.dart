@@ -222,6 +222,20 @@ class HashRecordPool implements RecordPool {
       _buckets.write(_file);
       _header.write(_file);
     } else {
+      // GUARD:poolpage >>>
+      // The bucket-table page pointer is read straight from disk. A corrupt
+      // one can name bytes past EOF (→ `readInto` EINVAL) or a length so large
+      // it allocates gigabytes, and a length below one full pointer yields a
+      // zero bucket count (→ `% count` divide-by-zero on every lookup). Bound
+      // it to the file and to at least one bucket before reading.
+      final page = _header.page;
+      if (page.offset < 0 ||
+          page.length < Pointer.WIDTH ||
+          page.offset + page.length > length) {
+        throw DBMException(500,
+            'Corrupt bucket-table page (offset ${page.offset}, length ${page.length})');
+      }
+      // GUARD:poolpage <<<
       _buckets = PointerBlock(_header.page);
       _buckets.read(_file);
     }
